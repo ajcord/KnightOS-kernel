@@ -1,3 +1,15 @@
+; FP Math TODO:
+; 1. Addition and subtraction
+; 2. Multiplication and division
+; 3. Miscellaneous math operations:
+;   - Roots/powers
+;   - Logarithms
+;   - Trigonometry
+;   - etc.
+; 4. Conversion to and from IEEE 754 floats/doubles
+
+
+
 ;; itofp [FP Math]
 ;;  Converts a 32-bit unsigned integer into a floating-point
 ;;  binary coded decimal format and stores it to the buffer at HL.
@@ -6,7 +18,10 @@
 ;;  HL: Pointer to 9-byte destination buffer
 ;; Notes:
 ;;  The result is in the following format:
-;;  * 1 byte flags, currently only a sign bit as the MSB
+;;  * 1 byte flags:
+;;      - 7: Sign bit
+;;      - 4-6: Reserved for kernel
+;;      - 0-3: Available for program use
 ;;  * 1 byte signed exponent, normalized to 0x80 instead of 0
 ;;  * 7 byte mantissa, BCD encoded with two digits per byte
 itofp:
@@ -114,10 +129,7 @@ _:
 ;; Output:
 ;;  Z: Set on success, reset on error
 ;; Notes:
-;;  The result is in the following format:
-;;  * 1 byte flags, currently only a sign bit as the MSB
-;;  * 1 byte signed exponent, normalized to 0x80 instead of 0
-;;  * 7 byte mantissa, BCD encoded with two digits per byte
+;;  See `itofp` for the result format.
 ;;
 ;;  Only the first 14 significant digits are converted. The rest are truncated
 ;;  but still used for exponent calculation.
@@ -270,6 +282,7 @@ _:
 ;;
 ;; TODO:
 ;;  * Rounding last digit - buggy, currently abandoned
+;;  * Never show exponent if significand is 0 - not started
 .macro fptostrIter1(reg)
         ; Output the first digit in the byte pointed to by reg
         ld a, (reg)
@@ -382,7 +395,7 @@ fptostr:
         ld a, (ix + 1)
         cp 0x8a
         jp nc, _
-        cp 0x7c
+        cp 0x7d
         jp c, _
         ; Normal mode
         pop af \ push af
@@ -404,22 +417,33 @@ _:
             ; Calculate number of digits to display
             pop af \ push af
             bit 4, a
-            jr nz, _
-            ; Normal mode
-            ld a, (ix + 1)
-            sub 0x7F
-            jr ++_
-_:
+            jr z, _
             ; Scientific notation
             ld a, 1
+            jr .beginIPart
 _:
+            ; Normal mode
+            ld a, (ix + 1)
+            cp 0x80
+            jr c, _
+            sub 0x7F
+            jr .beginIPart
+_:
+            ; Negative exponent
+            ld (hl), '0'
+            inc hl
+            push ix \ pop de
+            inc de \ inc de
+            ld c, 10    ; Should be 9, but that causes it to skip the last digit
+            xor a
+            jp .doneWithIPart
+.beginIPart:
             ld b, a     ; Number of pre-decimal digits
             ld a, 10
             sub b
             ld c, a     ; (Maximum) number of post-decimal digits
             push ix \ pop de
-            inc de
-            inc de
+            inc de \ inc de
 .iPartLoop:
             fptostrIter1(de)
             fptostrInsertPVSep
@@ -489,6 +513,29 @@ _:
             pop af
 .skipFloating:
             fptostrI18N('.', ',')
+            ; Check if we need to add leading zeroes
+            push af
+                ; Make sure we aren't in scientific notation mode
+                inc sp \ inc sp
+                pop af \ push af
+                dec sp \ dec sp
+                bit 4, a
+                jr nz, _
+                ; Check the exponent
+                ld a, (ix + 1)
+                sub 0x80
+                jr nc, _
+                neg
+                dec a
+                jr z, _
+                ld b, a
+.leadingZeroLoop:
+                ld (hl), '0'
+                inc hl
+                dec c
+                djnz .leadingZeroLoop
+_:
+            pop af
             ld b, c
             dec a
             jr z, .fPartLoopHalf
@@ -548,6 +595,176 @@ _:
 .undefine fptostrI18N
 .undefine fptostrInsertPVSep
 
+;; fpLdConst [FP Math]
+;;  Loads a floating point constant specified by A into HL.
+;; Input:
+;;  A: Which constant to load:
+;;      - 0: 0.0
+;;      - 1: 1.0
+;;      - 2: pi
+;;      - 3: pi/2
+;;      - 4: pi/4
+;;      - 5: pi/180
+;;      - 6: 180/pi
+;;      - 7: e
+;;      - 8: log(e)
+;;      - 9: ln(10)
+;;  HL: Pointer to destination buffer
+fpLdConst:
+    push af
+    push bc
+    push de
+    push hl
+        ex de, hl
+        ld hl, .lookupTable
+        ld bc, 9
+.macro fpLdConstIter
+        add hl, bc
+        dec a
+        jr z, _
+.endmacro
+        or a
+        jr z, _
+        fpLdConstIter
+        fpLdConstIter
+        fpLdConstIter
+        fpLdConstIter
+        fpLdConstIter
+        fpLdConstIter
+        fpLdConstIter
+        fpLdConstIter
+        fpLdConstIter
+.undefine fpLdConstIter
+        ; None matched - return unchanged
+        jr .end
+_:
+        ldir
+.end:
+    pop hl
+    pop de
+    pop bc
+    pop af
+    ret
+
+.lookupTable:
+    ; 0
+    .db 0x00, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+    ; 1
+    .db 0x00, 0x80, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+    ; pi
+    .db 0x00, 0x80, 0x31, 0x41, 0x59, 0x26, 0x53, 0x58, 0x98
+    ; pi/2
+    .db 0x00, 0x80, 0x15, 0x70, 0x79, 0x63, 0x26, 0x79, 0x49
+    ; pi/4
+    .db 0x00, 0x7F, 0x78, 0x53, 0x98, 0x16, 0x33, 0x97, 0x45
+    ; pi/180
+    .db 0x00, 0x7E, 0x17, 0x45, 0x32, 0x92, 0x51, 0x99, 0x43
+    ; 180/pi
+    .db 0x00, 0x81, 0x57, 0x29, 0x57, 0x79, 0x51, 0x30, 0x82
+    ; e
+    .db 0x00, 0x80, 0x27, 0x18, 0x28, 0x18, 0x28, 0x45, 0x90
+    ; log(e)
+    .db 0x00, 0x7F, 0x43, 0x42, 0x94, 0x48, 0x19, 0x03, 0x25
+    ; ln(10)
+    .db 0x00, 0x80, 0x23, 0x02, 0x58, 0x50, 0x92, 0x99, 0x40
+
+; (Internal) Normalize the floating point number at HL.
+fpNormalize:
+    push af
+    push bc
+    push de
+        inc hl \ inc hl
+        push hl
+            ld c, 0
+            xor a
+.macro fpNormalizeCountLeading
+            ; Find the first nonzero byte
+            or (hl)
+            jr nz, _
+            inc hl
+            inc c
+.endmacro
+            fpNormalizeCountLeading
+            fpNormalizeCountLeading
+            fpNormalizeCountLeading
+            fpNormalizeCountLeading
+            fpNormalizeCountLeading
+            fpNormalizeCountLeading
+            fpNormalizeCountLeading
+.undefine fpNormalizeCountLeading
+        ; It's all zero, so clean it up and exit
+        pop hl
+        dec hl
+        ld (hl), 0x80
+        dec hl
+        ld (hl), 0
+        jr .end
+_:
+            ; HL points to the first nonzero byte
+            ; Copy from HL to the beginning of the significand
+            pop de \ push de
+            push bc
+                ld a, 7
+                sub c
+                ld c, a
+                ld b, 0
+                ldir
+            pop bc
+            ; Zero out the trailing bytes left over from copying
+            ld b, c
+            sla c
+            jr z, _
+            dec hl
+            xor a
+.zeroLoop:
+            ld (hl), a
+            dec hl
+            djnz .zeroLoop
+_:
+            ; Shift out the last leading zero if necessary
+            pop hl \ push hl
+            ld a, (hl)
+            and 0xF0
+            jr nz, _
+            inc c
+            ld de, 6
+            add hl, de
+.macro fpNormalizeShiftLeft
+            rld
+            dec hl
+.endmacro
+            fpNormalizeShiftLeft
+            fpNormalizeShiftLeft
+            fpNormalizeShiftLeft
+            fpNormalizeShiftLeft
+            fpNormalizeShiftLeft
+            fpNormalizeShiftLeft
+            fpNormalizeShiftLeft
+.undefine fpNormalizeShiftLeft
+_:
+        ; Fix exponent
+        pop hl
+        dec hl
+        ld a, (hl)
+        sub c
+        ld (hl), a
+        dec hl
+.end:
+    pop de
+    pop bc
+    pop af
+    ret
+
+;; fpAbs [FP Math]
+;;  Takes the absolute value of the floating point number at IX.
+;; Input:
+;;  IX: Pointer to operand
+;; Output:
+;;  IX: Pointer to result
+fpAbs:
+    res 7, (ix)
+    ret
+
 ;; fpNeg [FP Math]
 ;;  Negates the floating point number at IX.
 ;; Input:
@@ -556,9 +773,15 @@ _:
 ;;  IX: Pointer to result
 fpNeg:
     push af
-    ld a, (ix)
-    xor 0x80
-    ld (ix), a
+        ; Make sure operand is not zero
+        ld a, (ix + 2)
+        or a
+        jr z, .end
+        ; Invert the sign bit
+        ld a, (ix)
+        xor 0x80
+        ld (ix), a
+.end:
     pop af
     ret
 
@@ -570,9 +793,15 @@ fpNeg:
 ;;  HL: Pointer to destination buffer
 fpSub:
     push af
-    ld a, (iy)
-    xor 0x80
-    ld (iy), a
+        ; Make sure operand is not zero
+        ld a, (iy + 2)
+        or a
+        jr z, .end
+        ; Invert the sign bit
+        ld a, (iy)
+        xor 0x80
+        ld (iy), a
+.end:
     pop af
     ; Fall through to fpAdd
 ;; fpAdd [FP Math]
@@ -745,10 +974,139 @@ _:
     pop ix
     ret
 
+;; fpMulPow10 [FP Math]
+;;  Multiplies the floating point number in IX by 10^E.
+;; Input:
+;;  IX: Pointer to operand
+;;  E: Signed exponent (i.e. 2 -> 100, 3 -> 0.001)
+;; Output:
+;;  IX: Pointer to result
+;; Notes:
+;;  Does not check for overflow.
+fpMulPow10:
+    push af
+        ; Make sure operand is not zero
+        ld a, (ix + 2)
+        or a
+        jr z, .end
+        ; Add the exponents
+        ld a, (ix + 1)
+        add e
+        ld (ix + 1), a
+.end:
+    pop af
+    ret
+
+;; fpAnd [FP Math]
+;;  Performs a logical AND on the two floating point numbers.
+;; Inputs:
+;;  IX, IY: Pointers to operands
+;; Output:
+;;  Z: Result was false
+;;  NZ: Result was true
+fpAnd:
+    push bc
+        ; Save A in B to preserve flags
+        ld b, a
+        ; Check if first operand is 0
+        ld a, (ix + 2)
+        or a
+        jr z, .end
+        ; Check if second operand is 0
+        ld a, (iy + 2)
+        or a
+.end:
+        ; Restore A
+        ld a, b
+    pop bc
+    ret
+
+;; fpOr [FP Math]
+;;  Performs a logical OR on the two floating point numbers.
+;; Inputs:
+;;  IX, IY: Pointers to operands
+;; Output:
+;;  Z: Result was false
+;;  NZ: Result was true
+fpOr:
+    push bc
+        ; Save A in B to preserve flags
+        ld b, a
+        xor a
+        ; Check if first operand is 0
+        or (ix + 2)
+        jr nz, .end
+        ; Check if second operand is 0
+        or (iy + 2)
+.end:
+        ; Restore A
+        ld a, b
+    pop bc
+    ret
+
+;; fpXor [FP Math]
+;;  Performs a logical XOR on the two floating point numbers.
+;; Inputs:
+;;  IX, IY: Pointers to operands
+;; Output:
+;;  Z: Result was false
+;;  NZ: Result was true
+fpXor:
+    push bc
+        ; Save A in B to preserve flags
+        ld b, a
+        ; Check if first operand is 0
+        ld a, (ix + 2)
+        or a
+        jr nz, _
+        ; Check if second operand is 0
+        ld a, (iy + 2)
+        or a
+        jr .end
+_:
+        ; Check if second operand is nonzero
+        ld a, (iy + 2)
+        or a
+        jr nz, _
+        or 1
+        jr .end
+_:
+        xor a
+.end:
+        ; Restore A
+        ld a, b
+    pop bc
+    ret
+
+;; fpNot [FP Math]
+;;  Performs a logical NOT on the floating point number.
+;; Input:
+;;  IX: Pointer to operand
+;; Output:
+;;  Z: Result was false
+;;  NZ: Result was true
+fpNot:
+    push bc
+        ; Save A in B to preserve flags
+        ld b, a
+        ; Check if operand is 0
+        ld a, (ix + 2)
+        or a
+        jr nz, _
+        or 1
+        jr .end
+_:
+        xor a
+.end:
+        ; Restore A
+        ld a, b
+    pop bc
+    ret
+
 ;; fpCompare [FP Math]
 ;;  Compares the two floating point numbers.
 ;; Inputs:
-;;  IX, IY: Pointer to operands
+;;  IX, IY: Pointers to operands
 ;; Output:
 ;;  Same as z80 CP instruction.
 fpCompare:
@@ -793,4 +1151,203 @@ _:
     pop bc
     pop iy
     pop ix
+    ret
+
+;; fpMin [FP Math]
+;;  Finds the minimum of the two floating point numbers.
+;; Inputs:
+;;  IX, IY: Pointer to operands
+;; Output:
+;;  HL: Pointer to minimum
+fpMin:
+    call fpCompare
+    jr c, _
+    push iy \ pop hl
+    ret
+_:
+    push ix \ pop hl
+    ret
+
+;; fpMax [FP Math]
+;;  Finds the maximum of the two floating point numbers.
+;; Inputs:
+;;  IX, IY: Pointers to operands
+;; Output:
+;;  HL: Pointer to maximum
+fpMax:
+    call fpCompare
+    jr c, _
+    push ix \ pop hl
+    ret
+_:
+    push iy \ pop hl
+    ret
+
+;; fpRand [FP Math]
+;;  Generates a random floating point number between 0 and 1, similar to
+;;  TI-OS's `rand` command.
+;; Input:
+;;  HL: Pointer to output
+;; Notes:
+;;  Uses `getRandom` to generate the digits, so it is not cryptographically
+;;  random.
+fpRand:
+    push af
+    push bc
+    push de
+        push hl
+            ld (hl), 0
+            inc hl
+            ld (hl), 0x7F
+            inc hl
+.macro fpRandIter
+            call getRandom
+            ld b, a
+            and 0xF0
+            ld d, a
+            call div8By8
+            rld
+            ld a, b
+            and 0x0F
+            ld d, a
+            call div8By8
+            rld
+            inc hl
+.endmacro
+            ld e, 10
+            fpRandIter
+            fpRandIter
+            fpRandIter
+            fpRandIter
+            fpRandIter
+            fpRandIter
+            fpRandIter
+        pop hl
+        ; There may be leading zeroes, so normalize.
+        ; Note: There is no need to add extra random digits to compensate for
+        ; removed leading zeroes. Even leading zeroes count towards entropy,
+        ; so every result output from this function should have exactly
+        ; 14 digits of entropy (roughly 46.5 bits).
+        call fpNormalize
+.undefine fpRandIter
+    pop de
+    pop bc
+    pop af
+    ret
+
+;; fpIPart [FP Math]
+;;  Calculates the integer part of a floating point number, similar to
+;;  TI-OS's `iPart()` command.
+;; Input:
+;;  IX: Pointer to operand
+;; Output:
+;;  IX: Pointer to result
+fpIPart:
+    push af
+    push bc
+    push hl
+        push ix \ pop hl
+        inc hl \ inc hl
+        ; Check exponent
+        ld a, (ix + 1)
+        ; Very large numbers don't store a fractional part, so skip them
+        cp 0x80 + 14
+        jr nc, .end
+        ; Negative exponents have no integer part
+        cp 0x80
+        jr nc, _
+        ld (ix + 1), 0x80
+        xor a
+        jr .beginZeroLoop
+_:
+        sub 0x7F
+        ; Point HL to the first fractional byte
+        ld b, 0
+        ld c, a
+        srl c
+        add hl, bc
+.beginZeroLoop:
+        ; If there are an odd number of integer digits, only zero half of
+        ; the first byte
+        ld b, a
+        and 1
+        jr z, _
+        ld a, (hl)
+        and 0xF0
+        ld (hl), a
+        inc hl
+        inc b
+_:
+        ld a, 14
+        sub b
+        ld b, a
+        srl b
+        jr z, .end
+.zeroLoop:
+        ld (hl), 0
+        inc hl
+        djnz .zeroLoop
+.end:
+    pop hl
+    pop bc
+    pop af
+    ret
+
+;; fpFPart [FP Math]
+;;  Calculates the fractional part of a floating point number, similar to
+;;  TI-OS's `fPart()` command.
+;; Input:
+;;  IX: Pointer to operand
+;; Output:
+;;  IX: Pointer to result
+fpFPart:
+    push af
+    push bc
+    push hl
+        push ix \ pop hl
+        inc hl \ inc hl
+        ; Check exponent
+        ld a, (ix + 1)
+        ; Negative exponents are entirely fractional, so skip them
+        cp 0x80
+        jr c, .end
+        ; Very large numbers have no fractional part
+        cp 0x80 + 14
+        jr c, _
+        ld (ix + 1), 0x80
+        xor a
+        jr .beginZeroLoop
+_:
+        sub 0x80
+        ; Point HL to the last integer byte
+        ld b, 0
+        ld c, a
+        srl c
+        add hl, bc
+.beginZeroLoop:
+        ; If there are an odd number of integer digits, only zero half of
+        ; the first byte
+        ld b, a
+        and 1
+        jr nz, _
+        ld a, (hl)
+        and 0x0F
+        ld (hl), a
+        dec hl
+        dec b
+_:
+        inc b
+        srl b
+        jr z, .normalize
+.zeroLoop:
+        ld (hl), 0
+        dec hl
+        djnz .zeroLoop
+.normalize:
+        push ix \ pop hl
+        call fpNormalize
+.end:
+    pop hl
+    pop bc
+    pop af
     ret
