@@ -10,7 +10,7 @@
 
 
 
-;; itofp [FP Math]
+;; itofp [Decimal Floating Point]
 ;;  Converts a 32-bit unsigned integer into a floating-point
 ;;  binary coded decimal format and stores it to the buffer at HL.
 ;; Inputs:
@@ -18,12 +18,13 @@
 ;;  HL: Pointer to 9-byte destination buffer
 ;; Notes:
 ;;  The result is in the following format:
-;;  * 1 byte flags:
-;;      - 7: Sign bit
-;;      - 4-6: Reserved for kernel
-;;      - 0-3: Available for program use
-;;  * 1 byte signed exponent, normalized to 0x80 instead of 0
-;;  * 7 byte mantissa, BCD encoded with two digits per byte
+;;
+;;  - 1 byte flags:
+;;    - 7: Sign bit
+;;    - 4-6: Reserved for kernel
+;;    - 0-3: Available for program use
+;;  - 1 byte signed exponent, normalized to 0x80 instead of 0
+;;  - 7 byte mantissa, BCD encoded with two digits per byte
 itofp:
     ; Modified version of itostr
     push hl
@@ -120,13 +121,13 @@ _:
     pop hl
     ret
 
-;; strtofp [FP Math]
+;; strtofp [Decimal Floating Point]
 ;;  Converts an ASCII-encoded signed decimal into a floating-point
 ;;  binary coded decimal format and stores it to the buffer at HL.
 ;; Inputs:
 ;;  IX: Pointer to string
 ;;  HL: Pointer to 9-byte destination buffer
-;; Output:
+;; Outputs:
 ;;  Z: Set on success, reset on error
 ;; Notes:
 ;;  See `itofp` for the result format.
@@ -262,7 +263,7 @@ _:
     pop ix
     ret
 
-;; fptostr [FP Math]
+;; fptostr [Decimal Floating Point]
 ;;  Converts a floating point number into an ASCII-encoded decimal string.
 ;; Inputs:
 ;;  IX: Pointer to floating point number
@@ -271,7 +272,7 @@ _:
 ;; Notes:
 ;;  The destination buffer must be at least 20 characters in length.
 ;;
-;;  The most significant nibble of A should be set to flags. FP_STR_*
+;;  The most significant nibble of A should be set to flags. `FP_STR_*`
 ;;  macros in kernel.inc can be ORed and stored in A for convenience.
 ;;
 ;;  The least significant nibble of A is the number of digits to display
@@ -279,10 +280,14 @@ _:
 ;;  non-zero.
 ;;
 ;;  Examples:
+;;
 ;;  All nonzero decimals in scientific notation, with decimal as ',':
-;;    ld a, FP_STR_INV_PUNC | FP_DISP_SCIENTIFIC | 0xF
-;;  5 fixed digits grouped with ','
-;;    ld a, FP_GROUP_DIGITS | 5
+;;
+;;      ld a, FP_STR_INV_PUNC | FP_DISP_SCIENTIFIC | 0xF
+;;
+;;  5 fixed digits grouped with ',':
+;;
+;;      ld a, FP_GROUP_DIGITS | 5
 ; TODO:
 ;  * Rounding last digit - buggy, currently abandoned
 ;  * Never show exponent if significand is 0 - not started
@@ -598,10 +603,10 @@ _:
 .undefine fptostrI18N
 .undefine fptostrInsertPVSep
 
-;; fpLdConst [FP Math]
+;; fpLdConst [Decimal Floating Point]
 ;;  Loads a floating point constant specified by A into HL.
-;; Input:
-;;  A: Constant to load, use FP_* macros from kernel.inc
+;; Inputs:
+;;  A: Constant to load, use `FP_*` macros from kernel.inc
 ;;  HL: Pointer to destination buffer
 fpLdConst:
     push af
@@ -748,21 +753,21 @@ _:
     pop af
     ret
 
-;; fpAbs [FP Math]
+;; fpAbs [Decimal Floating Point]
 ;;  Takes the absolute value of the floating point number at IX.
-;; Input:
+;; Inputs:
 ;;  IX: Pointer to operand
-;; Output:
+;; Outputs:
 ;;  IX: Pointer to result
 fpAbs:
     res 7, (ix)
     ret
 
-;; fpNeg [FP Math]
+;; fpNeg [Decimal Floating Point]
 ;;  Negates the floating point number at IX.
-;; Input:
+;; Inputs:
 ;;  IX: Pointer to operand
-;; Output:
+;; Outputs:
 ;;  IX: Pointer to result
 fpNeg:
     push af
@@ -778,7 +783,7 @@ fpNeg:
     pop af
     ret
 
-;; fpSub [FP Math]
+;; fpSub [Decimal Floating Point]
 ;;  Subtracts the two floating point numbers.
 ;; Inputs:
 ;;  IX: Pointer to operand 1 (minuend)
@@ -797,7 +802,8 @@ fpSub:
 .end:
     pop af
     ; Fall through to fpAdd
-;; fpAdd [FP Math]
+
+;; fpAdd [Decimal Floating Point]
 ;;  Adds the two floating point numbers.
 ;; Inputs:
 ;;  IX, IY: Pointers to operands
@@ -967,12 +973,12 @@ _:
     pop ix
     ret
 
-;; fpMulPow10 [FP Math]
+;; fpMulPow10 [Decimal Floating Point]
 ;;  Multiplies the floating point number in IX by 10^E.
-;; Input:
+;; Inputs:
 ;;  IX: Pointer to operand
-;;  E: Signed exponent (i.e. 2 -> 100, 3 -> 0.001)
-;; Output:
+;;  E: Signed exponent (i.e. 2 -> 100, -3 -> 0.001)
+;; Outputs:
 ;;  IX: Pointer to result
 ;; Notes:
 ;;  Does not check for overflow.
@@ -990,11 +996,11 @@ fpMulPow10:
     pop af
     ret
 
-;; fpAnd [FP Math]
+;; fpAnd [Decimal Floating Point]
 ;;  Performs a logical AND on the two floating point numbers.
 ;; Inputs:
 ;;  IX, IY: Pointers to operands
-;; Output:
+;; Outputs:
 ;;  Z: Result was false
 ;;  NZ: Result was true
 fpAnd:
@@ -1014,11 +1020,11 @@ fpAnd:
     pop bc
     ret
 
-;; fpOr [FP Math]
+;; fpOr [Decimal Floating Point]
 ;;  Performs a logical OR on the two floating point numbers.
 ;; Inputs:
 ;;  IX, IY: Pointers to operands
-;; Output:
+;; Outputs:
 ;;  Z: Result was false
 ;;  NZ: Result was true
 fpOr:
@@ -1037,11 +1043,11 @@ fpOr:
     pop bc
     ret
 
-;; fpXor [FP Math]
+;; fpXor [Decimal Floating Point]
 ;;  Performs a logical XOR on the two floating point numbers.
 ;; Inputs:
 ;;  IX, IY: Pointers to operands
-;; Output:
+;; Outputs:
 ;;  Z: Result was false
 ;;  NZ: Result was true
 fpXor:
@@ -1071,11 +1077,11 @@ _:
     pop bc
     ret
 
-;; fpNot [FP Math]
+;; fpNot [Decimal Floating Point]
 ;;  Performs a logical NOT on the floating point number.
-;; Input:
+;; Inputs:
 ;;  IX: Pointer to operand
-;; Output:
+;; Outputs:
 ;;  Z: Result was false
 ;;  NZ: Result was true
 fpNot:
@@ -1096,12 +1102,12 @@ _:
     pop bc
     ret
 
-;; fpCompare [FP Math]
+;; fpCompare [Decimal Floating Point]
 ;;  Compares the two floating point numbers.
 ;; Inputs:
 ;;  IX, IY: Pointers to operands
-;; Output:
-;;  Same as z80 CP instruction.
+;; Outputs:
+;;  Flags: same as z80 CP instruction
 fpCompare:
     push ix
     push iy
@@ -1146,11 +1152,11 @@ _:
     pop ix
     ret
 
-;; fpMin [FP Math]
+;; fpMin [Decimal Floating Point]
 ;;  Finds the minimum of the two floating point numbers.
 ;; Inputs:
 ;;  IX, IY: Pointer to operands
-;; Output:
+;; Outputs:
 ;;  HL: Pointer to minimum
 fpMin:
     call fpCompare
@@ -1161,11 +1167,11 @@ _:
     push ix \ pop hl
     ret
 
-;; fpMax [FP Math]
+;; fpMax [Decimal Floating Point]
 ;;  Finds the maximum of the two floating point numbers.
 ;; Inputs:
 ;;  IX, IY: Pointers to operands
-;; Output:
+;; Outputs:
 ;;  HL: Pointer to maximum
 fpMax:
     call fpCompare
@@ -1176,10 +1182,10 @@ _:
     push iy \ pop hl
     ret
 
-;; fpRand [FP Math]
+;; fpRand [Decimal Floating Point]
 ;;  Generates a random floating point number between 0 and 1, similar to
 ;;  TI-OS's `rand` command.
-;; Input:
+;; Inputs:
 ;;  HL: Pointer to output
 ;; Notes:
 ;;  Uses `getRandom` to generate the digits, so it is not cryptographically
@@ -1228,12 +1234,12 @@ fpRand:
     pop af
     ret
 
-;; fpIPart [FP Math]
+;; fpIPart [Decimal Floating Point]
 ;;  Calculates the integer part of a floating point number, similar to
 ;;  TI-OS's `iPart()` command.
-;; Input:
+;; Inputs:
 ;;  IX: Pointer to operand
-;; Output:
+;; Outputs:
 ;;  IX: Pointer to result
 fpIPart:
     push af
@@ -1286,12 +1292,12 @@ _:
     pop af
     ret
 
-;; fpFPart [FP Math]
+;; fpFPart [Decimal Floating Point]
 ;;  Calculates the fractional part of a floating point number, similar to
 ;;  TI-OS's `fPart()` command.
-;; Input:
+;; Inputs:
 ;;  IX: Pointer to operand
-;; Output:
+;; Outputs:
 ;;  IX: Pointer to result
 fpFPart:
     push af
